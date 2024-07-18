@@ -130,6 +130,7 @@ namespace System.IO.Ports
                             result.ReadIndex = 3;
                         break;
                     }
+                    Thread.Sleep(1);
                 }
                 else
                 {
