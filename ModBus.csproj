@@ -15,7 +15,8 @@
 
 	<ItemGroup>
 		<PackageReference Include="System.IO.Ports" Version="8.0.0" />
-		<PackageReference Include="Tools" Version="2024.7.16" />
+		<PackageReference Condition=" '$(Configuration)'=='Release' " Include="Tools" Version="2024.7.16" />
+		<ProjectReference Condition=" '$(Configuration)'=='Debug' " Include="..\Tools\Tools.csproj" />
 	</ItemGroup>
 
 </Project>
