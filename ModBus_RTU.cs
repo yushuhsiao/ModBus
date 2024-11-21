@@ -272,7 +272,6 @@ namespace System.IO.Ports
             return 0;
         }
 
-
         public double ReadFloat64()
         {
             try
@@ -286,6 +285,7 @@ namespace System.IO.Ports
             catch { }
             return 0;
         }
+
         public double ReadFloat64_2()
         {
             try
@@ -303,6 +303,7 @@ namespace System.IO.Ports
             catch { }
             return 0;
         }
+
         public float ReadFloat32_2()
         {
             try
@@ -318,6 +319,20 @@ namespace System.IO.Ports
             return 0;
         }
 
+        public float ReadFloat32()
+        {
+            try
+            {
+                byte[] array = new byte[4];
+                Array.Copy(RecvData, 3, array, 0, array.Length);
+                Array.Reverse(array);
+                return BitConverter.ToSingle(array); 
+            }
+            catch {}
+            return 0;
+        }
+
+
         public long ReadInt64()
         {
             try
@@ -331,6 +346,9 @@ namespace System.IO.Ports
             catch { }
             return 0;
         }
+
+
+
 
         public void Skip(int count = 1) => ReadIndex += count;
 
