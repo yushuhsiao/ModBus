@@ -194,6 +194,14 @@ namespace System.IO.Ports
             base.WriteByte((byte)(value % 0x100));  //Lo 
         }
 
+        public void WriteInt32(int write_data)
+        {
+            base.WriteByte((byte)(write_data >> 24));
+            base.WriteByte((byte)(write_data >> 16));
+            base.WriteByte((byte)(write_data >> 8));
+            base.WriteByte((byte)write_data);
+        }
+
         //public void WriteFloat32(ushort value)
         //{
         //    byte[] floatBytes = new byte[4];
@@ -255,6 +263,14 @@ namespace System.IO.Ports
             short value = this.ReadByte();
             value <<= 8;
             value |= (short)this.ReadByte();
+            return value;
+        }
+
+        public int ReadInt32()
+        {
+            int value = 0;
+            for (int i = 0; i < 4; i++, value <<=8)
+                value |= this.ReadByte();
             return value;
         }
 
