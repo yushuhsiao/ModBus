@@ -2,7 +2,8 @@
 
 	<PropertyGroup>
 		<TargetFrameworks>netstandard2.1</TargetFrameworks>
-		<Version>2025.01.09</Version>
+		<Version>2025.01.10</Version>
+		<Description>ModBus</Description>
 	</PropertyGroup>
 	<Choose>
 		<When Condition=" '$(Configuration)'=='Release' ">
