@@ -2,7 +2,7 @@
 
 	<PropertyGroup>
 		<TargetFrameworks>netstandard2.1</TargetFrameworks>
-		<Version>2025.02.18</Version>
+		<Version>2025.02.19</Version>
 		<Description>ModBus</Description>
 	</PropertyGroup>
 	<Choose>
@@ -16,7 +16,7 @@
 
 	<ItemGroup>
 		<PackageReference Include="System.IO.Ports" Version="8.0.0" />
-		<PackageReference Condition=" '$(Configuration)'=='Release' " Include="Tools" Version="2025.2.19" />
+		<PackageReference Condition=" '$(Configuration)'=='Release' " Include="Tools" Version="2025.2.18" />
 		<ProjectReference Condition=" '$(Configuration)'=='Debug' " Include="..\Tools\Tools.csproj" />
 	</ItemGroup>
 
