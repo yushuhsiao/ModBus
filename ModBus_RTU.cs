@@ -31,7 +31,6 @@ namespace System.IO.Ports
             _config = config;
             _logger = logger;
         }
-
         public SerialPort Open(bool force)
         {
             try
@@ -55,7 +54,6 @@ namespace System.IO.Ports
                 return null;
             }
         }
-
         public void Close()
         {
             lock (_lock)
