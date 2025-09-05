@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.Collections.Generic;
 using System.Security.Cryptography;
@@ -7,67 +8,17 @@ using System.Threading;
 
 namespace System.IO.Ports
 {
-    public class ModBus_RTU
+    public class ModBus_RTU : SerialPortBase
     {
         private IConfiguration _config;
-        private ILogger _logger;
-        private object _lock = new object();
-        private SerialPort port;
-        public event EventHandler PortChange;
 
         public double ReadTimeout = 5000;
         public double RecvComplete_IdleTime = 3.5; // 接收完成閒置時間
-        public int ComPort = 1;
-        public int BaudRate = 38400;
-        public Parity Parity = Parity.None;
-        public int DataBits = 8;
-        public StopBits StopBits = StopBits.One;
 
-        public string PortName => port?.PortName;
-        public bool IsOpen => port?.IsOpen == true;
-
-        public ModBus_RTU(IConfiguration<ModBus_RTU> config, ILogger<ModBus_RTU> logger)
+        public ModBus_RTU(IServiceProvider service) : base(service) { }
+        public ModBus_RTU(IConfiguration<ModBus_RTU> config, ILogger<ModBus_RTU> logger) : base(logger)
         {
             _config = config;
-            _logger = logger;
-        }
-        public SerialPort Open(bool force)
-        {
-            try
-            {
-                lock (_lock)
-                {
-                    if (force) this.Close();
-                    if (this.port == null)
-                    {
-                        this.port = new SerialPort($"COM{ComPort}", BaudRate, Parity, DataBits, StopBits);
-                        this.port.Open();
-                        _logger.LogInformation($"{this.port.PortName}, {BaudRate}, {Parity}, {DataBits}, {StopBits}");
-                        PortChange?.Invoke(this, EventArgs.Empty);
-                    }
-                    return this.port;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, ex.Message);
-                return null;
-            }
-        }
-        public void Close()
-        {
-            lock (_lock)
-            {
-                if (port == null) return;
-                using (var p = port)
-                {
-                    _logger.LogInformation($"{p.PortName} Close.");
-                    try { port?.Close(); }
-                    catch { }
-                    port = null;
-                }
-            }
-            PortChange?.Invoke(this, EventArgs.Empty);
         }
 
         /// <summary>
@@ -98,7 +49,7 @@ namespace System.IO.Ports
             int offset = 0;
             int recvCount = 0;
             double readTimeout = this.ReadTimeout;
-            double readComplete_Idle = 1000.0 / (double)this.port.BaudRate * 1000 * RecvComplete_IdleTime;
+            double readComplete_Idle = 1000.0 / (double)port.BaudRate * 1000 * RecvComplete_IdleTime;
             while (port.IsOpen)
             {
                 t_Elapsed = DateTime.Now - beginTime;
@@ -267,7 +218,7 @@ namespace System.IO.Ports
         public int ReadInt32()
         {
             int value = 0;
-            for (int i = 0; i < 4; i++, value <<=8)
+            for (int i = 0; i < 4; i++, value <<= 8)
                 value |= this.ReadByte();
             return value;
         }
@@ -340,9 +291,9 @@ namespace System.IO.Ports
                 byte[] array = new byte[4];
                 Array.Copy(RecvData, 3, array, 0, array.Length);
                 Array.Reverse(array);
-                return BitConverter.ToSingle(array); 
+                return BitConverter.ToSingle(array);
             }
-            catch {}
+            catch { }
             return 0;
         }
 

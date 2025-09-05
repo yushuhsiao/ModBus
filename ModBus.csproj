@@ -2,6 +2,7 @@
 
 	<PropertyGroup>
 		<TargetFrameworks>netstandard2.1</TargetFrameworks>
+		<RootNamespace>System.IO.Ports</RootNamespace>
 		<Version>2025.05.03</Version>
 		<Description>ModBus</Description>
 	</PropertyGroup>
@@ -14,10 +15,22 @@
 		</When>
 	</Choose>
 
+
 	<ItemGroup>
-		<PackageReference Include="System.IO.Ports" Version="8.0.0" />
-		<PackageReference Condition=" '$(Configuration)'=='Release' " Include="Tools" Version="2025.5.3" />
-		<ProjectReference Condition=" '$(Configuration)'=='Debug' " Include="..\Tools\Tools.csproj" />
+		<PackageReference Include="System.IO.Ports" Version="9.0.8" />
 	</ItemGroup>
 
+	<Choose>
+		<When Condition=" '$(Configuration)'=='Debug' AND '$(SolutionName)'=='libs' ">
+			<ItemGroup>
+				<ProjectReference Include="..\Tools\Tools.csproj" />
+			</ItemGroup>
+		</When>
+		<Otherwise>
+			<ItemGroup>
+				<PackageReference Include="Tools" Version="2025.5.3" />
+			</ItemGroup>
+		</Otherwise>
+	</Choose>
+	
 </Project>
