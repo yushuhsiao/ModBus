@@ -25,13 +25,13 @@ namespace System.IO.Ports
             _logger = logger;
         }
 
-        public SerialPort Open(bool force)
+        public SerialPort Open(bool force, bool showError = true)
         {
             try
             {
                 lock (_lock)
                 {
-                    if (force) this.Close();
+                    if (force) this.Close(showError);
                     if (this.port == null)
                     {
                         this.port = new SerialPort($"COM{ComPort}", BaudRate, Parity, DataBits, StopBits);
@@ -44,19 +44,22 @@ namespace System.IO.Ports
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, ex.Message);
+                if (showError)
+                    _logger.LogError(ex, ex.Message);
+                this.Close(showError);
                 return null;
             }
         }
 
-        public void Close()
+        public void Close(bool showMessage = true)
         {
             lock (_lock)
             {
                 if (port == null) return;
                 using (var p = port)
                 {
-                    _logger.LogInformation($"{p.PortName} Close.");
+                    if (showMessage)
+                        _logger.LogInformation($"{p.PortName} Close.");
                     try { port?.Close(); }
                     catch { }
                     port = null;
