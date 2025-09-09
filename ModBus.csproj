@@ -3,7 +3,7 @@
 	<PropertyGroup>
 		<TargetFrameworks>netstandard2.1</TargetFrameworks>
 		<RootNamespace>System.IO.Ports</RootNamespace>
-		<Version>2025.09.08</Version>
+		<Version>2025.09.09</Version>
 		<Description>ModBus</Description>
 	</PropertyGroup>
 	<Choose>

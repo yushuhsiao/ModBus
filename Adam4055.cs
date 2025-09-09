@@ -18,65 +18,40 @@ namespace System.IO.Ports
 
         public Adam4055(IServiceProvider service) : base(service)
         {
+            DI = new DI_Value();
+            DO = new DO_Value(this);
         }
 
-        private Interlocked_Int32 _di = new Interlocked_Int32();
-        private Interlocked_Int32 _do = new Interlocked_Int32();
+        public DI_Value DI { get; }
+        public DO_Value DO { get; }
         public DateTime ReadTime { get; set; }
         public TimeSpan ReadElapsed { get; set; }
         public DateTime WriteTime { get; set; }
         public TimeSpan WriteElapsed { get; set; }
-        public int DI => _di.Value;
-        public int DO => _do.Value;
 
-        public bool DI7 => (_di.Value & 0x80) != 0;
-        public bool DI6 => (_di.Value & 0x40) != 0;
-        public bool DI5 => (_di.Value & 0x20) != 0;
-        public bool DI4 => (_di.Value & 0x10) != 0;
-        public bool DI3 => (_di.Value & 0x08) != 0;
-        public bool DI2 => (_di.Value & 0x04) != 0;
-        public bool DI1 => (_di.Value & 0x02) != 0;
-        public bool DI0 => (_di.Value & 0x01) != 0;
+        public class DI_Value
+        {
+            internal Interlocked_Int32 _value = new Interlocked_Int32();
+            public int Value => _value.Value;
 
-        public bool DO7
-        {
-            get => (_do.Value & 0x80) != 0;
-            set => SetDO(7, value);
+            internal DI_Value() { }
+
+            public bool this[int bit] => (_value.Value & 1 << bit) != 0;
         }
-        public bool DO6
+
+        public class DO_Value
         {
-            get => (_do.Value & 0x40) != 0;
-            set => SetDO(6, value);
-        }
-        public bool DO5
-        {
-            get => (_do.Value & 0x20) != 0;
-            set => SetDO(5, value);
-        }
-        public bool DO4
-        {
-            get => (_do.Value & 0x10) != 0;
-            set => SetDO(4, value);
-        }
-        public bool DO3
-        {
-            get => (_do.Value & 0x08) != 0;
-            set => SetDO(3, value);
-        }
-        public bool DO2
-        {
-            get => (_do.Value & 0x04) != 0;
-            set => SetDO(2, value);
-        }
-        public bool DO1
-        {
-            get => (_do.Value & 0x02) != 0;
-            set => SetDO(1, value);
-        }
-        public bool DO0
-        {
-            get => (_do.Value & 0x01) != 0;
-            set => SetDO(0, value);
+            private Adam4055 _src;
+            internal Interlocked_Int32 _value = new Interlocked_Int32();
+            public int Value => _value.Value;
+
+            internal DO_Value(Adam4055 src) { _src = src; }
+
+            public bool this[int bit]
+            {
+                get => (_value.Value & 1 << bit) != 0;
+                set => _src.SetDO(bit, value);
+            }
         }
 
         private bool SendAndGetResponse(string cmd, out string res, out TimeSpan elapsed)
@@ -159,8 +134,8 @@ namespace System.IO.Ports
                     {
                         var _do = Convert.ToInt32(res.Substring(1, 2), 16);
                         var _di = Convert.ToInt32(res.Substring(3, 2), 16);
-                        this._di.Value = _di;
-                        this._do.Value = _do;
+                        this.DI._value.Value = _di;
+                        this.DO._value.Value = _do;
                         //Console.WriteLine($"{cmd}\t{res}\t DO : {_do.ToString("X2")}, DI :{_di.ToString("X2")}\t{(int)elapsed.TotalMilliseconds}ms");
                         return (_di, _do);
                     }
