@@ -2,8 +2,11 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Threading;
+using System.Threading.Tasks;
 
 
 namespace System.IO.Ports
@@ -20,6 +23,9 @@ namespace System.IO.Ports
         {
             _config = config;
         }
+
+
+        
 
         /// <summary>
         /// 傳送資料並且等候回應

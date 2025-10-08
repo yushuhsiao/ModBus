@@ -5,6 +5,7 @@
 		<RootNamespace>System.IO.Ports</RootNamespace>
 		<Version>2025.09.09</Version>
 		<Description>ModBus</Description>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 	</PropertyGroup>
 	<Choose>
 		<When Condition=" '$(Configuration)'=='Release' ">
