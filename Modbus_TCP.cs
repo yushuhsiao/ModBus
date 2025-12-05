@@ -1,9 +1,9 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using Newtonsoft.Json;
+using System.Linq;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
-using static System.IO.Ports.ModBus_TCP;
+using System.Threading.Tasks;
 
 namespace System.IO.Ports
 {
@@ -11,6 +11,7 @@ namespace System.IO.Ports
     {
         private IConfiguration _config;
         public ILogger _logger;
+
         public double ReadTimeout = 3000;
         public ModBus_TCP(IConfiguration<ModBus_TCP> config, ILogger<ModBus_TCP> logger)
         {
@@ -18,26 +19,39 @@ namespace System.IO.Ports
             _logger = logger;
         }
 
-        public CommandPacket SendAndRecive(byte[] send, string IP, int Port)
+        bool IsConnected(TcpClient client)
+        {
+            if (client == null || client.Client == null) return false;
+            if (!client.Client.Connected) return false;
+            bool part1 = client.Client.Poll(0, SelectMode.SelectRead);
+            bool part2 = (client.Client.Available == 0);
+            if (part1 && part2) return false; 
+            return true;
+        }
+
+        public async Task<(TcpClient tcp, CommandPacket packet)> SendAndRecive(TcpClient tcp, string IP, int Port, byte[] send)
         {
             try
             {
-                TcpClient tcp = new TcpClient();
-                tcp.Connect(IP, Port);
-
-                if (tcp.Connected)
+                if (IsConnected(tcp) == false)   
                 {
-                    byte[] data_s;
-                    using (var s = new MemoryStream())
-                    {
-                        s.WriteAsync(send);
-                        //s.CopyTo(tcp.GetStream());
-                        s.Flush();
-                        data_s = s.ToArray();
-                    }
-                    tcp.Client.Send(data_s, 0, data_s.Length, SocketFlags.None);
+                    tcp?.Close();
+                    tcp?.Dispose();
+                    await Task.Delay(200); 
+                    tcp = new TcpClient();
+                    await tcp.ConnectAsync(IP, Port); //"127.0.0.1", 502 
+                }
+                else 
+                {
+                    //傳送
+                    await tcp.GetStream().WriteAsync(send, 0, send.Length);
 
-                    byte[] tmp = new byte[16];
+                    //接收(簡單)
+                    //var response = new byte[1024];
+                    //var readCount = await tcp.GetStream().ReadAsync(response, 0, response.Length);
+
+                    //接收(包含Timeout)
+                    byte[] tmp = new byte[1024];
                     MbapHeader? header = null;
                     CommandPacket? packet = null;
                     int Size = Marshal.SizeOf<MbapHeader>();
@@ -47,62 +61,54 @@ namespace System.IO.Ports
                         var t1 = DateTime.Now;
                         for (; ; )
                         {
-                            var t2 = DateTime.Now - t1;
-                            if (t2.TotalMilliseconds > ReadTimeout)
-                            {
-                                // timeout
+                            if ((DateTime.Now - t1).TotalMilliseconds > ReadTimeout)
                                 break;
-                            }
-                            if (tcp.Available > 0)
+
+                            int cnt = tcp.Client.Receive(tmp);
+                            if (cnt <= 0)
+                                continue;
+
+                            s.Write(tmp, 0, cnt);
+
+                            byte[] buf = s.ToArray();
+                            var total_length = s.Length;
+
+                            //解析 Header 
+                            if (header == null && total_length >= Size)
                             {
-                                int cnt = tcp.Client.Receive(tmp);
-                                s.Write(tmp, 0, cnt);
-                                try
+                                header = new MbapHeader
                                 {
-                                    //當前封包總長度 
-                                    var total_length = s.Length;
+                                    TransactionId = (ushort)((buf[0] << 8) | buf[1]),
+                                    ProtocolId = (ushort)((buf[2] << 8) | buf[3]),
+                                    Length = (ushort)((buf[4] << 8) | buf[5]),
+                                    UnitId = buf[6]
+                                };
 
-                                    //檢查 Heater 
-                                    if (header == null && total_length >= Size)
-                                    {
-                                        byte[] buf = s.ToArray();
-                                        unsafe
-                                        {
-                                            fixed (byte* ptr = buf)
-                                                header = *(MbapHeader*)ptr;
-                                        }
-                                        //建立封包結構
-                                        packet = new CommandPacket
-                                        {
-                                            Header = header.Value,
-                                            Data = new byte[header.Value.Length] //初始化 
-                                        };
-                                    }
+                                packet = new CommandPacket
+                                {
+                                    Header = header.Value,
+                                    Data = new byte[header.Value.Length - 1]
+                                };
+                            }
 
-                                    //檢查 Data
-                                    if (header != null && total_length >= Size + header.Value.Length)
-                                    {
-                                        byte[] buf = s.ToArray();
-                                        Array.Copy(buf, Size, packet.Data, 0, header.Value.Length);
-
-                                        _logger.LogDebug(
-                                            $"Recv data : {JsonConvert.SerializeObject(packet.Header)}, " +
-                                            $"Data = [{packet.Data.ToHexString(",")}]"
-                                        );
-
-                                        //收到完整封包，返回 
-                                        return packet;
-                                    }
-                                }
-                                catch { break; }
+                            //檢查 Data
+                            if (header != null && total_length >= Size + (header.Value.Length - 1))
+                            {
+                                Array.Copy(buf, Size, packet.Data, 0, packet.Data.Length);
+                                return (tcp, packet);
                             }
                         }
                     }
                 }
             }
-            catch { }
-            return default;
+            catch (Exception ex) {
+                //_logger.LogError(ex, ex.Message);
+                _logger.LogError("Modbus_TCP 連線異常"); 
+            }
+            return (tcp, default); 
         }
+
+
 
         /// <summary> 同步範例 </summary>
         //public void tcp_demo2()
@@ -151,15 +157,29 @@ namespace System.IO.Ports
 
     }
 
+    /// <summary>
+    /// Modbus TCP 協定使用 Big Endian（高位在前），而 C# 預設是 Little Endian
+    /// </summary>
     public class ModBusTCPStream : MemoryStream
     {
-        public static byte[] PDU(ModBus_TCP.FunctionCode FunctionCode, byte Address, byte Quentity)
+        public static byte[] PDU(ModBus_TCP.FunctionCode FunctionCode, short Address, short Quentity)
         {
-            using var pduStream = new MemoryStream();
-            pduStream.WriteByte((byte)FunctionCode);
-            pduStream.WriteByte(Address);
-            pduStream.WriteByte(Quentity);
-            return pduStream.ToArray();
+            using var pdu = new MemoryStream();
+            pdu.WriteByte((byte)FunctionCode);
+
+            var address = BitConverter.GetBytes(Address);
+            var quantity = BitConverter.GetBytes(Quentity);
+            if (BitConverter.IsLittleEndian)
+            {
+                address = address.Reverse().ToArray();
+                quantity = quantity.Reverse().ToArray();
+            }
+            pdu.WriteByte(address[0]);
+            pdu.WriteByte(address[1]);
+            pdu.WriteByte(quantity[0]);
+            pdu.WriteByte(quantity[1]);
+
+            return pdu.ToArray();
         }
 
         /// <summary>
@@ -174,13 +194,21 @@ namespace System.IO.Ports
         /// Length = 1 (Unit Identifier) + 1 (Function Code) + Data <br />
         /// PDU = Function Code + Data
         /// </summary>
-        public ModBusTCPStream(int Transaction, /*Protocol*/ /*Length*/ /*unit*/ byte[] PDU)
+        public ModBusTCPStream( /*Transaction*/ /*Protocol*/ /*Length*/ /*unit*/ int Length)
         {
-            base.WriteByte((byte)Transaction);//Transaction 
-            base.WriteByte((byte)0x0000);     //Protocol 
-            base.WriteByte((byte)PDU.Length); //Length
-            base.WriteByte((byte)0x01);       //Unit
-            base.Write(PDU);                  //PDU = Function Code + Data
+            base.WriteByte((byte)0x00);                        //Transaction 
+            base.WriteByte((byte)0x01);                        //
+            base.WriteByte((byte)0x00);                        //Protocol 
+            base.WriteByte((byte)0x00);                        //
+            //                                                 //
+            short _Length = (short)Length;                     //Length
+            var lengthBytes = BitConverter.GetBytes(_Length);  //
+            if (BitConverter.IsLittleEndian)                   //
+                lengthBytes = lengthBytes.Reverse().ToArray(); //
+            base.WriteByte(lengthBytes[0]);                    //
+            base.WriteByte(lengthBytes[1]);                    //
+            //                                                 //
+            base.WriteByte((byte)0x01);                        //Unit
 
         }
 
