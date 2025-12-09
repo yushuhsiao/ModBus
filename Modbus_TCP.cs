@@ -25,7 +25,7 @@ namespace System.IO.Ports
             if (!client.Client.Connected) return false;
             bool part1 = client.Client.Poll(0, SelectMode.SelectRead);
             bool part2 = (client.Client.Available == 0);
-            if (part1 && part2) return false; 
+            if (part1 && part2) return false;
             return true;
         }
 
@@ -33,65 +33,71 @@ namespace System.IO.Ports
         {
             try
             {
-                if (IsConnected(tcp) == false)   
+                if (IsConnected(tcp) == false)
                 {
                     tcp?.Close();
                     tcp?.Dispose();
-                    await Task.Delay(200); 
                     tcp = new TcpClient();
                     await tcp.ConnectAsync(IP, Port); //"127.0.0.1", 502 
                 }
-                else 
+
+                if (!tcp.Connected)
                 {
-                    //傳送
-                    await tcp.GetStream().WriteAsync(send, 0, send.Length);
+                    _logger.LogError("Modbus_TCP 連線失敗");
+                    return (tcp, default);
+                }
 
-                    //接收(簡單)
-                    //var response = new byte[1024];
-                    //var readCount = await tcp.GetStream().ReadAsync(response, 0, response.Length);
 
-                    //接收(包含Timeout)
-                    byte[] tmp = new byte[1024];
-                    MbapHeader? header = null;
-                    CommandPacket? packet = null;
-                    int Size = Marshal.SizeOf<MbapHeader>();
+                //傳送
+                await tcp.GetStream().WriteAsync(send, 0, send.Length);
 
-                    using (var s = new MemoryStream())
+                //接收(簡單)
+                //var response = new byte[1024];
+                //var readCount = await tcp.GetStream().ReadAsync(response, 0, response.Length);
+
+                //接收(包含Timeout)
+                byte[] tmp = new byte[1024];
+                CommandPacket? packet = null;
+                int Size = Marshal.SizeOf<MbapHeader>();
+                byte[] buf = null;
+                var t1 = DateTime.Now;
+                MbapHeader? header = null;
+                using (var s = new MemoryStream())
+                {
+                    while ((DateTime.Now - t1).TotalMilliseconds <= ReadTimeout)
                     {
-                        var t1 = DateTime.Now;
-                        for (; ; )
+                        int cnt = await tcp.GetStream().ReadAsync(tmp, 0, tmp.Length);
+
+                        if (cnt == 0)
                         {
-                            if ((DateTime.Now - t1).TotalMilliseconds > ReadTimeout)
-                                break;
+                            break;
+                        }
+                        if (cnt < 0)
+                        {
+                            await Task.Delay(1);
+                            continue;
+                        }
 
-                            int cnt = tcp.Client.Receive(tmp);
-                            if (cnt <= 0)
-                                continue;
+                        s.Write(tmp, 0, cnt);
+                        var total_length = s.Length;
+                        if (buf == null && total_length >= Size)
+                            buf = s.GetBuffer();
 
-                            s.Write(tmp, 0, cnt);
-
-                            byte[] buf = s.ToArray();
-                            var total_length = s.Length;
-
-                            //解析 Header 
-                            if (header == null && total_length >= Size)
+                        if (header == null && buf != null && total_length >= Size)
+                        {
+                            header = new MbapHeader
                             {
-                                header = new MbapHeader
-                                {
-                                    TransactionId = (ushort)((buf[0] << 8) | buf[1]),
-                                    ProtocolId = (ushort)((buf[2] << 8) | buf[3]),
-                                    Length = (ushort)((buf[4] << 8) | buf[5]),
-                                    UnitId = buf[6]
-                                };
+                                TransactionId = (ushort)((buf[0] << 8) | buf[1]),
+                                ProtocolId = (ushort)((buf[2] << 8) | buf[3]),
+                                Length = (ushort)((buf[4] << 8) | buf[5]),
+                                UnitId = buf[6]
+                            };
+                            packet = new CommandPacket
+                            {
+                                Header = header.Value,
+                                Data = new byte[header.Value.Length - 1]
+                            };
 
-                                packet = new CommandPacket
-                                {
-                                    Header = header.Value,
-                                    Data = new byte[header.Value.Length - 1]
-                                };
-                            }
-
-                            //檢查 Data
                             if (header != null && total_length >= Size + (header.Value.Length - 1))
                             {
                                 Array.Copy(buf, Size, packet.Data, 0, packet.Data.Length);
@@ -101,11 +107,12 @@ namespace System.IO.Ports
                     }
                 }
             }
-            catch (Exception ex) {
-                //_logger.LogError(ex, ex.Message);
-                _logger.LogError("Modbus_TCP 連線異常"); 
+            catch (Exception ex)
+            {
+                _logger.LogError("Modbus_TCP 連線異常");
+                try { tcp?.Close(); tcp?.Dispose(); } catch { } 
             }
-            return (tcp, default); 
+            return (tcp, default);
         }
 
 
