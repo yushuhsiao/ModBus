@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 using System.Linq;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
@@ -19,26 +20,33 @@ namespace System.IO.Ports
             _logger = logger;
         }
 
-        bool IsConnected(TcpClient client)
-        {
-            if (client == null || client.Client == null) return false;
-            if (!client.Client.Connected) return false;
-            bool part1 = client.Client.Poll(0, SelectMode.SelectRead);
-            bool part2 = (client.Client.Available == 0);
-            if (part1 && part2) return false;
-            return true;
-        }
+        bool IsConnected(TcpClient client) => client?.Connected == true;
+        //{
+        //    if (client == null || client.Client == null) return false;
+        //    if (!client.Client.Connected) return false;
+        //    bool part1 = client.Client.Poll(0, SelectMode.SelectRead);
+        //    bool part2 = (client.Client.Available == 0);
+        //    if (part1 && part2) return false;
+        //    return true;
+        //}
 
-        public async Task<(TcpClient tcp, CommandPacket packet)> SendAndRecive(TcpClient tcp, string IP, int Port, byte[] send)
+        public async Task<(TcpClient tcp, CommandPacket packet)> SendAndReceive(TcpClient tcp, string IP, int Port, byte[] send)
         {
+            if (send == null) throw new ArgumentNullException(nameof(send));
             try
             {
                 if (IsConnected(tcp) == false)
                 {
-                    tcp?.Close();
-                    tcp?.Dispose();
+                    DisconnectSafely(tcp);
                     tcp = new TcpClient();
-                    await tcp.ConnectAsync(IP, Port); //"127.0.0.1", 502 
+                    var connectTask = tcp.ConnectAsync(IP, Port);
+                    var mines = 5000;
+                    if (await Task.WhenAny(connectTask, Task.Delay(mines)) != connectTask)
+                    {
+                        _logger.LogError("Modbus_TCP 連線超時");
+                        DisconnectSafely(tcp); // 確保不洩漏 SocketMbapHeader
+                        return (new TcpClient(), default);
+                    }
                 }
 
                 if (!tcp.Connected)
@@ -47,44 +55,52 @@ namespace System.IO.Ports
                     return (tcp, default);
                 }
 
+                var stream = tcp.GetStream();
 
-                //傳送
-                await tcp.GetStream().WriteAsync(send, 0, send.Length);
+                //Write
+                await stream.WriteAsync(send, 0, send.Length);
 
-                //接收(簡單)
-                //var response = new byte[1024];
-                //var readCount = await tcp.GetStream().ReadAsync(response, 0, response.Length);
-
-                //接收(包含Timeout)
+                //Read 
                 byte[] tmp = new byte[1024];
                 CommandPacket? packet = null;
-                int Size = Marshal.SizeOf<MbapHeader>();
-                byte[] buf = null;
-                var t1 = DateTime.Now;
+                int headerSize = Marshal.SizeOf<MbapHeader>();
+
                 MbapHeader? header = null;
+                var sw = Stopwatch.StartNew();
                 using (var s = new MemoryStream())
                 {
-                    while ((DateTime.Now - t1).TotalMilliseconds <= ReadTimeout)
+                    while (sw.Elapsed.TotalMilliseconds <= ReadTimeout)
                     {
-                        int cnt = await tcp.GetStream().ReadAsync(tmp, 0, tmp.Length);
+                        var readMs = ReadTimeout - sw.Elapsed.TotalMilliseconds;
+                        if (readMs <= 0) break;
+                        var readMs_ = (int)Math.Ceiling(Math.Min(readMs, (double)int.MaxValue));
+
+
+                        var readTask = stream.ReadAsync(tmp, 0, tmp.Length);
+                        var completed = await Task.WhenAny(readTask, Task.Delay(readMs_));
+                        if (completed != readTask) break;
+
+                        int cnt;
+                        try
+                        {
+                            cnt = await readTask;
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError("Modbus_TCP 讀取異常");
+                            DisconnectSafely(tcp);
+                            return (tcp, default);
+                        }
 
                         if (cnt == 0)
-                        {
                             break;
-                        }
-                        if (cnt < 0)
-                        {
-                            await Task.Delay(1);
-                            continue;
-                        }
 
                         s.Write(tmp, 0, cnt);
                         var total_length = s.Length;
-                        if (buf == null && total_length >= Size)
-                            buf = s.GetBuffer();
 
-                        if (header == null && buf != null && total_length >= Size)
+                        if (header == null && total_length >= headerSize)
                         {
+                            byte[] buf = s.GetBuffer();
                             header = new MbapHeader
                             {
                                 TransactionId = (ushort)((buf[0] << 8) | buf[1]),
@@ -92,15 +108,22 @@ namespace System.IO.Ports
                                 Length = (ushort)((buf[4] << 8) | buf[5]),
                                 UnitId = buf[6]
                             };
-                            packet = new CommandPacket
-                            {
-                                Header = header.Value,
-                                Data = new byte[header.Value.Length - 1]
-                            };
 
-                            if (header != null && total_length >= Size + (header.Value.Length - 1))
+                            var pdulength = header.Value.Length - 1;
+                            if (pdulength < 0)
                             {
-                                Array.Copy(buf, Size, packet.Data, 0, packet.Data.Length);
+                                _logger.LogWarning("Modbus_TCP 負的 PDU 長度: {PDU}", pdulength);
+                                break;
+                            }
+
+                            if (total_length >= headerSize + pdulength)
+                            {
+                                packet = new CommandPacket
+                                {
+                                    Header = header.Value,
+                                    Data = new byte[pdulength]
+                                };
+                                Array.Copy(buf, headerSize, packet.Data, 0, packet.Data.Length);
                                 return (tcp, packet);
                             }
                         }
@@ -110,9 +133,14 @@ namespace System.IO.Ports
             catch (Exception ex)
             {
                 _logger.LogError("Modbus_TCP 連線異常");
-                try { tcp?.Close(); tcp?.Dispose(); } catch { } 
+                DisconnectSafely(tcp);
             }
             return (tcp, default);
+        }
+         
+        public void DisconnectSafely(TcpClient tcp)
+        {
+            try { tcp?.Close(); tcp?.Dispose(); } catch { }
         }
 
 
