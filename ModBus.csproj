@@ -3,7 +3,7 @@
 	<PropertyGroup>
 		<TargetFrameworks>netstandard2.1</TargetFrameworks>
 		<RootNamespace>System.IO.Ports</RootNamespace>
-		<Version>2025.12.26</Version>
+		<Version>2026.2.11</Version>
 		<Description>ModBus</Description>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<PackAsTool>False</PackAsTool>
@@ -19,7 +19,7 @@
 
 
 	<ItemGroup>
-		<PackageReference Include="System.IO.Ports" Version="9.0.8" />
+		<PackageReference Include="System.IO.Ports" Version="10.0.3" />
 	</ItemGroup>
 
 	<Choose>
@@ -30,7 +30,7 @@
 		</When>
 		<Otherwise>
 			<ItemGroup>
-				<PackageReference Include="Tools" Version="2025.5.3" />
+				<PackageReference Include="Tools" Version="2026.2.11" />
 			</ItemGroup>
 		</Otherwise>
 	</Choose>
