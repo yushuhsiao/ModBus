@@ -1,5 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 
 namespace System.IO.Ports
 {
@@ -19,11 +18,11 @@ namespace System.IO.Ports
         public string PortName => port?.PortName;
         public bool IsOpen => port?.IsOpen == true;
 
-        public SerialPortBase(IServiceProvider service) : this(service?.GetService<ILogger<SerialPortBase>>()) { }
-        public SerialPortBase(ILogger<SerialPortBase> logger)
+        public SerialPortBase(IServiceProvider service)
         {
-            _logger = logger;
+            _logger = service.GetService(typeof(ILogger<>).MakeGenericType(this.GetType())) as ILogger;
         }
+        public SerialPortBase(ILogger logger) { _logger = logger; }
 
         public SerialPort Open(bool force, bool showError = true)
         {

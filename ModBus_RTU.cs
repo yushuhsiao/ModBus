@@ -1,31 +1,23 @@
 ﻿using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System.Buffers.Binary;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Threading;
-using System.Threading.Tasks;
 
 
 namespace System.IO.Ports
 {
     public class ModBus_RTU : SerialPortBase
     {
-        private IConfiguration _config;
-
         public double ReadTimeout = 5000;
         public double RecvComplete_IdleTime = 3.5; // 接收完成閒置時間
 
         public ModBus_RTU(IServiceProvider service) : base(service) { }
-        public ModBus_RTU(IConfiguration<ModBus_RTU> config, ILogger<ModBus_RTU> logger) : base(logger)
-        {
-            _config = config;
-        }
+        public ModBus_RTU(ILogger logger) : base(logger) { }
 
 
-        
+
 
         /// <summary>
         /// 傳送資料並且等候回應
@@ -202,7 +194,8 @@ namespace System.IO.Ports
         private static ushort GetCRC(byte[] buffer)
         {
             if (buffer.Length > 2)
-                return BitConverter.ToUInt16(buffer, buffer.Length - 2);
+                return BinaryPrimitives.ReadUInt16LittleEndian(buffer.AsSpan(buffer.Length - 2, 2));
+            //return BitConverter.ToUInt16(buffer, buffer.Length - 2);
             return 0;
         }
 
@@ -215,29 +208,52 @@ namespace System.IO.Ports
             //
             // 01010101 00000000
             // 00000000 01010111 
-            short value = this.ReadByte();
-            value <<= 8;
-            value |= (short)this.ReadByte();
-            return value;
+            //short value = this.ReadByte();
+            //value <<= 8;
+            //value |= (short)this.ReadByte();
+            //return value;
+            try
+            {
+                var value = BinaryPrimitives.ReadInt16BigEndian(RecvData.AsSpan(ReadIndex, sizeof(short)));
+                ReadIndex += sizeof(short);
+                return value;
+            }
+            catch { }
+            return 0;
         }
 
         public int ReadInt32()
         {
-            int value = 0;
-            for (int i = 0; i < 4; i++, value <<= 8)
-                value |= this.ReadByte();
-            return value;
+            try
+            {
+                var value = BinaryPrimitives.ReadInt32BigEndian(RecvData.AsSpan(ReadIndex, sizeof(int)));
+                ReadIndex += sizeof(int);
+                return value;
+            }
+            catch { }
+            return 0;
+            //int value = 0;
+            //for (int i = 0; i < 4; i++, value <<= 8)
+            //    value |= this.ReadByte();
         }
 
         public ushort ReadUInt16()
         {
             try
             {
-                byte[] tmp = new byte[2];
-                Array.Copy(RecvData, ReadIndex, tmp, 0, tmp.Length);
-                ReadIndex += tmp.Length;
-                Array.Reverse(tmp);
-                return BitConverter.ToUInt16(tmp);
+                var value = BinaryPrimitives.ReadUInt16BigEndian(RecvData.AsSpan(ReadIndex, sizeof(ushort)));
+                ReadIndex += sizeof(ushort);
+                return value;
+                //ushort value = this.ReadByte();
+                //value <<= 8;
+                //value |= this.ReadByte();
+                //return value;
+
+                //byte[] tmp = new byte[2];
+                //Array.Copy(RecvData, ReadIndex, tmp, 0, tmp.Length);
+                //ReadIndex += tmp.Length;
+                //Array.Reverse(tmp);
+                //return BitConverter.ToUInt16(tmp);
             }
             catch { }
             return 0;
@@ -308,11 +324,14 @@ namespace System.IO.Ports
         {
             try
             {
-                byte[] tmp = new byte[8];
-                Array.Copy(RecvData, ReadIndex, tmp, 0, tmp.Length);
-                ReadIndex += tmp.Length;
-                Array.Reverse(tmp);
-                return BitConverter.ToInt64(tmp);
+                var value = BinaryPrimitives.ReadInt64BigEndian(RecvData.AsSpan(ReadIndex, sizeof(long)));
+                ReadIndex += sizeof(long);
+                return value;
+                //byte[] tmp = new byte[8];
+                //Array.Copy(RecvData, ReadIndex, tmp, 0, tmp.Length);
+                //ReadIndex += tmp.Length;
+                //Array.Reverse(tmp);
+                //return BitConverter.ToInt64(tmp);
             }
             catch { }
             return 0;
