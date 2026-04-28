@@ -1,5 +1,6 @@
-﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Security.Cryptography;
@@ -47,7 +48,7 @@ namespace System.IO.Ports
             int offset = 0;
             int recvCount = 0;
             double readTimeout = this.ReadTimeout;
-            double readComplete_Idle = 1000.0 / (double)port.BaudRate * 1000 * RecvComplete_IdleTime;
+            double readComplete_Idle = port.BaudRate > 19200 ? 1.75 : (((double)port.DataBits + 3.0) * RecvComplete_IdleTime * 1000.0) / port.BaudRate;
             while (port.IsOpen)
             {
                 t_Elapsed = DateTime.Now - beginTime;
@@ -91,6 +92,87 @@ namespace System.IO.Ports
             return result;
         }
 
+        public bool SendAndGetResponse(Data data)
+        {
+            DateTime beginTime = data.BeginTime = DateTime.Now;
+            var sendBuf = data.GetSendBuffer();
+
+            var port = this.Open(false);
+            if (port == null)
+            {
+                data.PortNotOpen = true;
+                return false;
+            }
+            if (port.IsOpen == false)
+            {
+                data.PortNotOpen = true;
+                return false;
+            }
+
+            port.DiscardInBuffer();
+            port.DiscardOutBuffer();
+
+            port.Write(sendBuf, 0, sendBuf.Length);
+
+            //讀取
+            var recvBuf = ArrayPool<byte>.Shared.Rent(256);
+            TimeSpan t_Elapsed;
+            TimeSpan t_Finish = TimeSpan.Zero;
+            try
+            {
+                DateTime idle = DateTime.Now;
+                int offset = 0;
+                int recvCount = 0;
+                double readTimeout = this.ReadTimeout;
+                //double readComplete_Idle = 1000.0 / (double)port.BaudRate * 1000.0 * RecvComplete_IdleTime;
+                double readComplete_Idle = port.BaudRate > 19200 ? 1.75 : (((double)port.DataBits + 3.0) * RecvComplete_IdleTime * 1000.0) / port.BaudRate;
+                while (port.IsOpen)
+                {
+                    t_Elapsed = DateTime.Now - beginTime;
+                    if (t_Elapsed.TotalMilliseconds > readTimeout)
+                        break;
+                    if (port.BytesToRead > 0)
+                    {
+                        int readLen = recvBuf.Length - offset;
+                        if (readLen <= 0)
+                            break;
+                        int cnt = port.Read(recvBuf, offset, readLen);
+                        offset += cnt;
+                        idle = DateTime.Now;
+                        recvCount++;
+                        t_Finish = t_Elapsed;
+                    }
+                    else if (recvCount > 0)
+                    {
+                        var idle_time = DateTime.Now - idle;
+                        if (idle_time.TotalMilliseconds >= readComplete_Idle)
+                        {
+                            // address + func code + crc = 4 bytes
+                            if (offset >= 4)
+                            {
+                                data.ReadIndex = 3;
+                                data.RecvData = recvBuf.AsSpan(0, offset).ToArray();
+                                return true;
+                            }
+                            break;
+                        }
+                        Thread.Sleep(1);
+                    }
+                    else
+                    {
+                        Thread.Sleep(1);
+                    }
+                }
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(recvBuf);
+                data.Elapsed = t_Finish.TotalMilliseconds;
+                data.TotalElapsed = (DateTime.Now - beginTime).TotalMilliseconds;
+            }
+            return false;
+        }
+
         public enum FunctionCode
         {
             ReadOutputCoils = 0x01,
@@ -102,8 +184,134 @@ namespace System.IO.Ports
             WriteMultipleOutputs = 0x0f,
             WriteMultipleHoldingRegister = 0x10,
         }
-    }
 
+        public class Data
+        {
+            public Data(int address, ModBus_RTU.FunctionCode functionCode) : this(address, (int)functionCode) { }
+            public Data(int address, int functionCode)
+            {
+                SendData = ArrayPool<byte>.Shared.Rent(256);
+                this.WriteByte((byte)address);
+                this.WriteByte((byte)functionCode);
+            }
+
+            public bool PortNotOpen { get; internal set; }
+            public bool IsTimeout { get; internal set; }
+            public bool IsSuccess => VerifyCRC;
+
+            public byte[] SendData { get; internal set; } = Array.Empty<byte>();
+            public byte[] RecvData { get; internal set; } = Array.Empty<byte>();
+            public DateTime BeginTime { get; internal set; }
+            public double Elapsed { get; internal set; }
+            public double TotalElapsed { get; internal set; }
+
+            public int Address_Out => RecvData.Get(0);
+            public int Address_In => SendData.Get(0);
+            public int FunctionCode_Out => RecvData.Get(1);
+            public int FunctionCode_In => SendData.Get(1);
+            public ushort CRC_Out => GetCRC(RecvData);
+            public ushort CRC_In => GetCRC(SendData);
+            public bool VerifyCRC => CRC_Out == CalcCRC(RecvData);
+
+            private static ushort GetCRC(byte[] buffer)
+            {
+                if (buffer.Length > 2)
+                    return BinaryPrimitives.ReadUInt16LittleEndian(buffer.AsSpan(buffer.Length - 2, 2));
+                return 0;
+            }
+            public ushort CalcCRC(byte[] buffer)
+            {
+                if (buffer.Length > 2)
+                    return Crypto.ModRTU_CRC(buffer, buffer.Length - 2);
+                return 0;
+            }
+
+            // for write
+
+            private int send_index = 0;
+
+            public void WriteByte(byte value)
+            {
+                if (send_index == -1)
+                    return;
+                SendData[send_index++] = value;
+            }
+
+            public void WriteUInt16(int value) => WriteUInt16((ushort)value);
+            public void WriteUInt16(ushort value)
+            {
+                if (send_index == -1)
+                    return;
+                BinaryPrimitives.WriteUInt16BigEndian(SendData.AsSpan(send_index, sizeof(ushort)), value);
+                send_index += sizeof(ushort);
+            }
+
+            public void WriteInt32(int write_data)
+            {
+                if (send_index == -1)
+                    return;
+                BinaryPrimitives.WriteInt32BigEndian(SendData.AsSpan(send_index, sizeof(int)), write_data);
+                send_index += sizeof(int);
+            }
+
+            internal byte[] GetSendBuffer()
+            {
+                if (send_index == -1)
+                    return SendData;
+                byte[] sendBuf = new byte[send_index + sizeof(ushort)];
+                SendData.AsSpan(0, send_index).CopyTo(sendBuf);
+                ArrayPool<byte>.Shared.Return(SendData);
+                this.SendData = sendBuf;
+                send_index = -1;
+
+                var crc = CalcCRC(sendBuf);
+                BinaryPrimitives.WriteUInt16LittleEndian(sendBuf.AsSpan(sendBuf.Length - sizeof(ushort), sizeof(ushort)), crc);
+                return sendBuf;
+            }
+
+
+            // for read
+
+            public int ReadIndex { get; set; } = 3;
+
+            private delegate T ReadPrimitivesDelegate<T>(ReadOnlySpan<byte> span);
+
+            private T ReadPrimitives<T>(int size, ReadPrimitivesDelegate<T> readFunc)
+            {
+                var readIndex = this.ReadIndex + size;
+                if (RecvData.Length - 2 >= readIndex)
+                {
+                    try
+                    {
+                        var value = readFunc(RecvData.AsSpan(ReadIndex, size));
+                        ReadIndex = readIndex;
+                        return value;
+                    }
+                    catch { }
+                }
+                return default;
+            }
+
+            public void Skip(int count = 1) => ReadIndex += count;
+            public byte ReadByte()
+            {
+                if ((RecvData.Length - 2) > ReadIndex)
+                    return RecvData[ReadIndex++];
+                return 0;
+            }
+            public short ReadInt16() => ReadPrimitives(sizeof(short), BinaryPrimitives.ReadInt16BigEndian);
+            public ushort ReadUInt16() => ReadPrimitives(sizeof(ushort), BinaryPrimitives.ReadUInt16BigEndian);
+            public int ReadInt32() => ReadPrimitives(sizeof(int), BinaryPrimitives.ReadInt32BigEndian);
+            public uint ReadUInt32() => ReadPrimitives(sizeof(uint), BinaryPrimitives.ReadUInt32BigEndian);
+            public long ReadInt64() => ReadPrimitives(sizeof(long), BinaryPrimitives.ReadInt64BigEndian);
+            public ulong ReadUInt64() => ReadPrimitives(sizeof(ulong), BinaryPrimitives.ReadUInt64BigEndian);
+
+            public override string ToString() => $@"{BeginTime}
+Send : {SendData?.ToHexString(" ")} ,CRC = {CRC_In.ToString("X")}
+Recv : {RecvData?.ToHexString(" ")} ,CRC = {CRC_Out.ToString("X")}
+Time : {Elapsed}ms, Total : {TotalElapsed}ms";
+        }
+    }
 
     public class ModBusStream : MemoryStream
     {
