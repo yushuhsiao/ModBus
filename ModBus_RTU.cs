@@ -197,7 +197,7 @@ namespace System.IO.Ports
 
             public bool PortNotOpen { get; internal set; }
             public bool IsTimeout { get; internal set; }
-            public bool IsSuccess => VerifyCRC;
+            public bool IsSuccess => SendData.Length > 0 && RecvData.Length >= 4 && VerifyCRC;
 
             public byte[] SendData { get; internal set; } = Array.Empty<byte>();
             public byte[] RecvData { get; internal set; } = Array.Empty<byte>();
