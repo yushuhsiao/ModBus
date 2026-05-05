@@ -1,4 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
 
 namespace System.IO.Ports
 {
@@ -9,11 +12,11 @@ namespace System.IO.Ports
         private SerialPort port;
         public event EventHandler PortChange;
 
-        public int ComPort = 1;
-        public int BaudRate = 38400;
-        public Parity Parity = Parity.None;
-        public int DataBits = 8;
-        public StopBits StopBits = StopBits.One;
+        public virtual int ComPort { get; set; } = 1;
+        public virtual int BaudRate { get; set; } = 38400;
+        public virtual Parity Parity { get; set; } = Parity.None;
+        public virtual int DataBits { get; set; } = 8;
+        public virtual StopBits StopBits { get; set; } = StopBits.One;
 
         public string PortName => port?.PortName;
         public bool IsOpen => port?.IsOpen == true;
@@ -66,5 +69,25 @@ namespace System.IO.Ports
             }
             PortChange?.Invoke(this, EventArgs.Empty);
         }
+
+
+
+        private static TimeCounter _comPorts_timer = new TimeCounter();
+        private static Interlocked<IEnumerable<string>> _comports = new Interlocked<IEnumerable<string>>() { Value = Array.Empty<string>() };
+        public static IEnumerable<string> ComPorts
+        {
+            get
+            {
+                yield return "Disabled";
+                if (_comPorts_timer.IsTimeout(2000, true))
+                    _comports.Value = SerialPort.GetPortNames().Distinct().OrderBy(p => p);
+                var ports = _comports.Value;
+                foreach (var s in ports)
+                    yield return s;
+            }
+        }
+
+        private static readonly int[] _baudRates = new[] { 9600, 19200, 38400, 57600, 115200 };
+        public static IEnumerable<int> BaudRates => _baudRates;
     }
 }

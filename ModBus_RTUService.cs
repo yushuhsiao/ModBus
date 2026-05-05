@@ -5,40 +5,27 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO.Ports;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 
 namespace Leader.Services
 {
-    public abstract class ModBus_RTUService<T> where T : ModBus_RTU
+    public abstract class ModBus_RTUService
     {
         public BusyState Busy { get; } = new BusyState();
         protected readonly ILogger _logger;
         protected readonly IConfiguration _config;
-        protected abstract T Device { get; }
+        protected ModBus_RTU Device { get; }
+        public abstract string ConfigSectionName { get; }
 
         public ModBus_RTUService(IServiceProvider service)
         {
             _logger = (ILogger)service.GetService(typeof(ILogger<>).MakeGenericType(this.GetType()));
             _config = (IConfiguration)service.GetService(typeof(IConfiguration<>).MakeGenericType(this.GetType()));
+            Device = service.CreateInstance<ModBus_RTU>();
         }
 
-        private static TimeCounter _comPorts_timer = new TimeCounter();
-        private static IEnumerable<string> _comports = Array.Empty<string>();
-        public IEnumerable<string> ComPorts
-        {
-            get
-            {
-                yield return "Disabled";
-                if (_comPorts_timer.IsTimeout(2000, true))
-                    _comports = SerialPort.GetPortNames().Distinct().OrderBy(p => p);
-                var ports = _comports;
-                foreach (var s in ports)
-                    yield return s;
-            }
-        }
 
-        private static readonly int[] _baudRates = new[] { 9600, 19200, 38400, 57600, 115200 };
-        public IEnumerable<int> BaudRates => _baudRates;
 
         public string ComPortName
         {
@@ -56,8 +43,6 @@ namespace Leader.Services
                     this.ComPort = 0;
             }
         }
-
-        public abstract string ConfigSectionName { get; }
 
         [AppSetting]
         public virtual int ComPort
@@ -129,7 +114,7 @@ namespace Leader.Services
             _config_change.Value = true;
             return value;
         }
-        protected bool IsConfigChanged() => _config_change.Exchange(false);
+        private bool IsConfigChanged() => _config_change.Exchange(false);
 
         protected void ConfigChange()
         {
@@ -147,31 +132,14 @@ namespace Leader.Services
             }
         }
 
-        protected bool Execute<TValue>(TValue value, Func<TValue, bool> cb)
-        {
-            try
-            {
-                using (Busy.Enter(out var busy))
-                {
-                    if (busy)
-                        return false;
-                    ConfigChange();
-                    return cb(value);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, ex.Message);
-            }
-            return false;
-        }
+
 
         private Dictionary<int, Dictionary<string, ModBus_RTU.Data>> msgs = new Dictionary<int, Dictionary<string, ModBus_RTU.Data>>();
-        protected void SetMsg(int siteId, string key, ModBus_RTU.Data value)
+        protected void SetMsg(int siteId, [CallerMemberName] string key = null, ModBus_RTU.Data msg = null)
         {
             if (!msgs.TryGetValue(siteId, out var dict))
                 msgs[siteId] = dict = new Dictionary<string, ModBus_RTU.Data>();
-            dict[key] = value;
+            dict[key] = msg;
         }
         public ModBus_RTU.Data GetMsg(int siteId, string key)
         {
