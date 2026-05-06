@@ -36,6 +36,8 @@ namespace System.IO.Ports
                     if (force) this.Close(showError);
                     if (this.port == null)
                     {
+                        if (this.ComPort <= 0)
+                            return null;
                         this.port = new SerialPort($"COM{ComPort}", BaudRate, Parity, DataBits, StopBits);
                         this.port.Open();
                         _logger.LogInformation($"{this.port.PortName}, {BaudRate}, {Parity}, {DataBits}, {StopBits}");

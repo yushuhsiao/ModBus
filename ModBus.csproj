@@ -3,7 +3,7 @@
 	<PropertyGroup>
 		<TargetFrameworks>netstandard2.1</TargetFrameworks>
 		<RootNamespace>System.IO.Ports</RootNamespace>
-		<Version>2026.4.29</Version>
+		<Version>2026.05.06</Version>
 		<Description>ModBus</Description>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<PackAsTool>False</PackAsTool>
